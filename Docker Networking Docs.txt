@@ -1,0 +1,189 @@
+ ----------------****  DOCKER NETWORKING ***------------------------
+
+Requirements : Docker Knowledge , host(ubuntu/linux), virtual machines
+
+Docker Networking involves 7 network types
+
+open ubuntu vm
+ 
+1) default bridge
+
+launch the terminal:
+
+ip address show
+change NAT Network to bridge Network
+ip address show
+
+sudo apt update
+sudo apt install docker.io docker-compose
+ip address show
+we are now able to see docker interface which acts like a virtual bridge
+sudo docker network ls
+driver = network type
+sudo docker run -itd --rm --name hulk busybox
+sudo docker run -itd --rm --name shield busybox
+sudo docker run -itd --rm --name iron  ngnix
+
+
+when we deployed those containers in the default network docker automatically created three virtual ethernet interface and connected it to docker0 bridge and it acts like a switch and theres a ethernet interface for  each of our containers. 
+so containers at eth0 interface,  will connect to those 3 virtual etherne interface
+
+ip address show
+bridge link
+sudo docker inspect bridge
+
+Now we can see each of the interface have their own IP address in that same Docker zero network, it has dns and it actually takes a copy of that resolve file ( /etc/resolv.conf) from the hosts and put it into the container. so they are using the same dns and because the docker0 network acts like a switch. so the containers can talk to each other
+
+sudo docker exec -it hulk sh
+ip add
+ping ( ip)
+container can ping the internet
+ip route
+Using NAT Masquerading , docker 0 gets the internet for the container
+
+Now web server iron which has nginx server image 
+
+sudo docker stop iron
+sudo docker run -itd --rm -p 80:80 --name iron nginx
+Telling docker to expose containers port 80 to host
+sudo docker ps
+in Browser open the nginx server with IP address now we can see it opening nginx server
+
+2) The user-defined Bridge
+
+sudo docker network create asgard
+ip address show
+new docker network created 
+sudo docker  network ls
+sudo docker run -itd --rm --network asgard -name loki busybox
+sudo docker run -itd --rm --network asgard -name odin busybox
+ip address show
+bridge link
+sudo docker inspect asgard
+Asgard is isolated and protected from previously created bridge network
+sudo docker exec -it hulk sh
+- ping (asgard ip address)
+Network is isolated
+
+we will get container container dns
+sudo docker exec -it loki sh
+-ping odin
+
+3) HOST networking
+
+
+sudo docker stop iron
+sudo docker run -itd --rm --network host --name iron nginx
+deploy it
+
+when we deploy a container to a host network it just totally bums of the host
+open it in browser
+runs as a normal application instead of container
+NOTE - if we deploy something likse wireguard vpn container,  we dont want to isolate the container with a sepearte virtual ip address. instead we can run this application directly connected to host network.
+
+no isolation but runs like a application
+
+4) MAC VLAN
+
+connect our docker containers to our physical networks suh as MAC VLAN Network. Containers ethernet interfaces are connecting directly to switch . they get their own MAC address, have their own ip address on our home network. They acts like virtual machines
+
+sudo docker network cretae -d macvlan \
+> --subnet (homenet subnet) \
+> --gateway (router ip) \
+> -o parent=enp0s3(host network interface) \
+> newasgard
+
+sudo docker network ls
+sudo docker stop hulk shield
+sudo docker run -itd --rm  --network newasgard \
+> --ip (new ip) \
+> --name hulk busybox
+
+sudo docker exec -it hul sh
+ ip address show
+ ping ( default gateway)
+
+each of our docker containers are getting their own mac address. network may not have multiple mac on one switch port . the connection is haring a port with the host . they are all connected to same port, which will see multiple Mac Addresses, and lot of times ports can't handle that, 
+turn on promiscous mode
+sudo ip link set (enetwork interface name )
+sudo docker exec -it thor sh 
+> ping default gateway
+sudo docker exec  -it shield
+> ping hulk
+> exit
+
+no dhcp, no control over promiscuous mode
+
+
+5) MAC VLAN - (802.1Q) Mode
+
+connect containers directly to network , create a sub interfaces and send individual networks VLAN  over the link like a trunk.
+sudo docker stop hulk shield
+sudo docker network rm newasguard
+
+sudo docker network  create -d macvlan \
+> --subnet (homenet subnet) \
+> --gateway (router ip) \
+> -o parent=enp0s3.20(host network interface)  \
+> macvlan 20
+
+sudo docker run -itd --rm --network newasguard \
+>  --ip (new ip) \
+> --name hulk busybox
+
+sudo docker exec -it hulk sh
+> ip address show
+exit
+
+6) IPVLAN ( L2 )
+
+same like  mac vlan, but not allow  shield and hulk assigned there own mac address , they allow host to share its MAC address with the containers.
+
+sudo docker network create -d ipvlan \
+> --subnet (homenet subnet) \
+> --gateway (router ip) \
+> -o parent=enp0s3(host network interface) \
+> newasgaurd
+
+sudo docker run -itd --rm --network newasguard \
+>  --ip (new ip) \
+> --name hulk busybox
+
+sudo docker exec -it hulk sh
+> ping ip
+exit
+
+ip address show
+
+check it with your windows console when u ping the ip and check the arp table MAC address is same as with host mac address
+
+\b) IPVLAN L3
+
+creates 2 new networks, home networks dont know how to reach them. this containers outside connection is layer 3. so no broadcast traffic. 
+
+
+we can do isolation at layer 3 can control who reaches them. 
+
+sudo docker stop hulk
+sudo docker network rm newasguard
+
+sudo docker network create -d ipvlan \
+> --subnet (homenet subnet) \
+> -o parent=enp0s3 -o ipvlan_mode=l3(host network interface) \
+> --subnet  (new subnet) \
+> newasguard
+
+sudo docker run -its --rm --network newasguard \
+> --ip (new ip) --name shield busybox
+
+use loki & odin instead of shield
+
+sudo docker inspect newasguard
+> ping google.com
+> ip route
+
+
+7) overlay network - docker swarm
+NONE NULL network
+
+
